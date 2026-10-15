@@ -1,9 +1,16 @@
 // Clipboard history. Devices upload; signed-in browsers read, search and delete. Every query is scoped by user_id.
 import type { Ctx, Route } from '../auth';
 import { HttpError, json, noContent, readJson, str } from '../http';
-import { rateLimit, sha256 } from '../security';
+import { fromBase64, rateLimit, sha256 } from '../security';
 
 export const MAX_CONTENT_BYTES = 1024 * 1024;
+const MAX_THUMBNAIL_BYTES = 128 * 1024;
+// Raster formats only, recognised by their signature bytes. Never SVG: it can carry scripts.
+const IMAGE_SIGNATURES: Record<string, number[]> = {
+  'image/png': [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  'image/jpeg': [0xff, 0xd8, 0xff],
+};
+const isImage = (bytes: Uint8Array, type: string) => IMAGE_SIGNATURES[type]?.every((b, i) => bytes[i] === b) === true;
 const PREVIEW_CHARS = 1000;
 const MAX_SEARCH_CHARS = 200;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{16,64}$/;
@@ -18,8 +25,8 @@ const retentionCutoff = (c: Ctx) =>
 async function upload(c: Ctx) {
   const deviceId = c.device?.id;
   await rateLimit(c.db, `upload:${deviceId}`, 120, 60);
-  // JSON escaping can grow text, so the body may be larger than the content limit.
-  const body = await readJson(c.req, 2 * MAX_CONTENT_BYTES);
+  // JSON escaping can grow text (HTML especially), so the body may be larger than the content limit.
+  const body = await readJson(c.req, 3 * MAX_CONTENT_BYTES);
   if ((body.content_type ?? 'text/plain') !== 'text/plain') {
     throw new HttpError(415, 'unsupported_content_type', 'Only text/plain clipboard content is supported.');
   }
@@ -27,15 +34,49 @@ async function upload(c: Ctx) {
   if (typeof content !== 'string' || content.length === 0 || !content.isWellFormed()) {
     throw new HttpError(400, 'invalid_request', '"content" must be a non-empty string of valid Unicode text.');
   }
+  // Optional formatted version (rich text as HTML). Data only: never rendered, only copied back to clipboards.
+  const html = body.html ?? null;
+  if (html !== null && (typeof html !== 'string' || html.length === 0 || !html.isWellFormed())) {
+    throw new HttpError(
+      400,
+      'invalid_request',
+      '"html", when present, must be a non-empty string of valid Unicode text.',
+    );
+  }
+  // Optional image (base64 PNG or JPEG) with a JPEG thumbnail. `content` is then a short label such as "Image 800 × 600".
+  const image = base64Field(body, 'image', MAX_CONTENT_BYTES);
+  const thumbnail = base64Field(body, 'thumbnail', MAX_THUMBNAIL_BYTES);
+  const imageType = body.image_type ?? null;
+  if (image) {
+    if (typeof imageType !== 'string' || !isImage(image, imageType)) {
+      throw new HttpError(415, 'unsupported_content_type', 'Images must be PNG or JPEG, matching "image_type".');
+    }
+    if (thumbnail && !isImage(thumbnail, 'image/jpeg')) {
+      throw new HttpError(415, 'unsupported_content_type', 'Thumbnails must be JPEG.');
+    }
+    if (html !== null) throw new HttpError(400, 'invalid_request', 'An entry is either formatted text or an image.');
+  } else if (thumbnail || imageType !== null) {
+    throw new HttpError(400, 'invalid_request', '"thumbnail" and "image_type" require "image".');
+  }
   const key = str(body, 'idempotency_key', 64);
   if (!IDEMPOTENCY_KEY.test(key)) {
     throw new HttpError(400, 'invalid_request', '"idempotency_key" must be 16-64 characters of [A-Za-z0-9_-].');
   }
   const bytes = new TextEncoder().encode(content);
-  if (bytes.byteLength > MAX_CONTENT_BYTES) {
-    throw new HttpError(413, 'content_too_large', `Clipboard content is limited to ${MAX_CONTENT_BYTES} bytes.`);
+  const size =
+    bytes.byteLength +
+    (html === null ? 0 : new TextEncoder().encode(html).byteLength) +
+    (image?.byteLength ?? 0) +
+    (thumbnail?.byteLength ?? 0);
+  if (size > MAX_CONTENT_BYTES) {
+    throw new HttpError(
+      413,
+      'content_too_large',
+      `Clipboard content, including formatting and images, is limited to ${MAX_CONTENT_BYTES} bytes.`,
+    );
   }
-  const hash = await sha256(bytes);
+  // Of the image, or of the plain text: copying the same thing again replaces the old entry.
+  const hash = await sha256(image ?? bytes);
   const userId = c.user.id;
   const id = crypto.randomUUID();
   const now = Date.now();
@@ -44,12 +85,27 @@ async function upload(c: Ctx) {
     c.db
       .prepare(
         `INSERT INTO clipboard_entries
-           (id, user_id, device_id, idempotency_key, content_type, content, content_hash, size_bytes, created_at)
-         SELECT ?1, ?2, ?3, ?4, 'text/plain', ?5, ?6, ?7, ?8
-         WHERE (SELECT storage_bytes FROM users WHERE id = ?2) + ?7 <= ?9
+           (id, user_id, device_id, idempotency_key, content_type, content, html, image, image_type, thumbnail,
+            content_hash, size_bytes, created_at)
+         SELECT ?1, ?2, ?3, ?4, 'text/plain', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
+         WHERE (SELECT storage_bytes FROM users WHERE id = ?2) + ?11 <= ?13
          ON CONFLICT (user_id, idempotency_key) DO NOTHING RETURNING id`,
       )
-      .bind(id, userId, deviceId, key, content, hash, bytes.byteLength, now, storageQuotaBytes(c.env)),
+      .bind(
+        id,
+        userId,
+        deviceId,
+        key,
+        content,
+        html,
+        image?.buffer ?? null,
+        image ? imageType : null,
+        thumbnail?.buffer ?? null,
+        hash,
+        size,
+        now,
+        storageQuotaBytes(c.env),
+      ),
     // Copying the same text again moves it to the top instead of duplicating it. Runs only if the insert did.
     c.db
       .prepare(
@@ -72,7 +128,24 @@ async function upload(c: Ctx) {
   throw new HttpError(507, 'storage_quota_exceeded', 'Storage quota reached. Delete history or shorten retention.');
 }
 
-const ENTRY_COLUMNS = `e.id, e.content_type, e.size_bytes, e.created_at,
+/** A base64 field decoded to bytes, or null when absent. */
+function base64Field(body: Record<string, unknown>, key: string, maxBytes: number): Uint8Array | null {
+  const value = body[key];
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new HttpError(400, 'invalid_request', `"${key}" must be base64 data.`);
+  }
+  if (value.length > Math.ceil(maxBytes / 3) * 4) {
+    throw new HttpError(413, 'content_too_large', `"${key}" is limited to ${maxBytes} bytes.`);
+  }
+  try {
+    return fromBase64(value);
+  } catch {
+    throw new HttpError(400, 'invalid_request', `"${key}" must be base64 data.`);
+  }
+}
+
+const ENTRY_COLUMNS = `e.id, e.content_type, e.size_bytes, e.created_at, e.image IS NOT NULL AS has_image, e.image_type,
   e.device_id, d.name AS device_name`;
 const ENTRY_FROM = 'clipboard_entries e LEFT JOIN devices d ON d.id = e.device_id AND d.user_id = e.user_id';
 
@@ -90,7 +163,8 @@ async function list(c: Ctx) {
   const cursor = cursorParam === null ? null : CURSOR.exec(cursorParam);
   if (cursorParam !== null && !cursor) throw new HttpError(400, 'invalid_request', 'Invalid cursor.');
 
-  let sql = `SELECT ${ENTRY_COLUMNS}, substr(e.content, 1, ?) AS preview, length(e.content) > ? AS truncated
+  let sql = `SELECT ${ENTRY_COLUMNS}, substr(e.content, 1, ?) AS preview, length(e.content) > ? AS truncated,
+      e.html IS NOT NULL AS has_html
     FROM ${ENTRY_FROM} WHERE e.user_id = ? AND e.created_at > ?`;
   const args: unknown[] = [PREVIEW_CHARS, PREVIEW_CHARS, c.user.id, retentionCutoff(c)];
   if (query) {
@@ -109,11 +183,16 @@ async function list(c: Ctx) {
   const { results } = await c.db
     .prepare(sql)
     .bind(...args)
-    .all<{ id: string; created_at: number; truncated: number }>();
+    .all<{ id: string; created_at: number; truncated: number; has_html: number; has_image: number }>();
   const page = results.slice(0, limit);
   const last = page.at(-1);
   return json({
-    entries: page.map((e) => ({ ...e, truncated: e.truncated === 1 })),
+    entries: page.map((e) => ({
+      ...e,
+      truncated: e.truncated === 1,
+      has_html: e.has_html === 1,
+      has_image: e.has_image === 1,
+    })),
     next_cursor: results.length > limit && last ? `${last.created_at}.${last.id}` : null,
   });
 }
@@ -121,12 +200,33 @@ async function list(c: Ctx) {
 async function get(c: Ctx) {
   const entry = await c.db
     .prepare(
-      `SELECT ${ENTRY_COLUMNS}, e.content FROM ${ENTRY_FROM} WHERE e.id = ? AND e.user_id = ? AND e.created_at > ?`,
+      `SELECT ${ENTRY_COLUMNS}, e.content, e.html FROM ${ENTRY_FROM} WHERE e.id = ? AND e.user_id = ? AND e.created_at > ?`,
     )
     .bind(c.params.id, c.user.id, retentionCutoff(c))
-    .first();
+    .first<{ has_image: number }>();
   if (!entry) throw new HttpError(404, 'not_found', 'Entry not found.');
-  return json({ entry });
+  return json({ entry: { ...entry, has_image: entry.has_image === 1 } });
+}
+
+/** The image bytes, or its thumbnail (falling back to the image). Same ownership and retention rules as entries. */
+async function imageBytes(c: Ctx, thumbnail: boolean) {
+  const row = await c.db
+    .prepare(
+      `SELECT ${thumbnail ? 'COALESCE(thumbnail, image)' : 'image'} AS data,
+         ${thumbnail ? "CASE WHEN thumbnail IS NULL THEN image_type ELSE 'image/jpeg' END" : 'image_type'} AS type
+       FROM clipboard_entries WHERE id = ? AND user_id = ? AND created_at > ? AND image IS NOT NULL`,
+    )
+    .bind(c.params.id, c.user.id, retentionCutoff(c))
+    .first<{ data: ArrayBuffer | number[]; type: string }>();
+  if (!row) throw new HttpError(404, 'not_found', 'Image not found.');
+  return new Response(new Uint8Array(row.data), {
+    headers: {
+      'Content-Type': row.type,
+      'Content-Disposition': `inline; filename="clipstead.${row.type === 'image/png' ? 'png' : 'jpg'}"`,
+      // Viewable when opened directly, but never a document that can run anything.
+      'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
+    },
+  });
 }
 
 async function remove(c: Ctx) {
@@ -162,6 +262,8 @@ export const routes: Route[] = [
   ['POST', '/api/v1/device/clipboard', 'device', upload],
   ['GET', '/api/v1/clipboard', 'session', list],
   ['GET', '/api/v1/clipboard/:id', 'session', get],
+  ['GET', '/api/v1/clipboard/:id/image', 'session', (c) => imageBytes(c, false)],
+  ['GET', '/api/v1/clipboard/:id/thumbnail', 'session', (c) => imageBytes(c, true)],
   ['DELETE', '/api/v1/clipboard/:id', 'session', remove],
   ['DELETE', '/api/v1/clipboard', 'session', clear],
 ];

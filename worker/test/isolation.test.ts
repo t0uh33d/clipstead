@@ -48,6 +48,22 @@ describe('cross-user isolation', () => {
     expect(res.body.entries.map((e: { preview: string }) => e.preview)).toEqual(['alice shared phrase']);
   });
 
+  it("A cannot fetch B's images or thumbnails", async () => {
+    const png = btoa(String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3));
+    const upload = await call('POST', '/api/v1/device/clipboard', {
+      token: bToken,
+      origin: null,
+      body: { content: 'Image 1 × 1', image: png, image_type: 'image/png', idempotency_key: crypto.randomUUID() },
+    });
+    for (const kind of ['image', 'thumbnail']) {
+      expectError(
+        await call('GET', `/api/v1/clipboard/${upload.body.entry.id}/${kind}`, { cookie: a.cookie }),
+        404,
+        'not_found',
+      );
+    }
+  });
+
   it("A cannot delete B's entry or clear B's history", async () => {
     expectError(await call('DELETE', `/api/v1/clipboard/${bEntryId}`, { cookie: a.cookie }), 404, 'not_found');
     expect((await call('DELETE', '/api/v1/clipboard', { cookie: a.cookie })).status).toBe(204);

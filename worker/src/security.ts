@@ -6,7 +6,13 @@ const encoder = new TextEncoder();
 export const toHex = (bytes: ArrayBuffer | Uint8Array) =>
   Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, '0')).join('');
 const toBase64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
-const fromBase64 = (text: string) => Uint8Array.from(atob(text), (ch) => ch.charCodeAt(0));
+/** Decodes standard base64 (throws on invalid input). A plain loop is fast enough for megabyte images. */
+export function fromBase64(text: string): Uint8Array {
+  const binary = atob(text);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
 
 /** A 256-bit random secret, base64url-encoded, with an optional type prefix (e.g. "csd_"). */
 export function randomToken(prefix = ''): string {

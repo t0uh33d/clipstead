@@ -99,7 +99,9 @@ export default {
     } catch (err) {
       res = errorResponse(err);
     }
-    for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.headers.set(name, value);
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      if (!res.headers.has(name)) res.headers.set(name, value);
+    }
     return res;
   },
 

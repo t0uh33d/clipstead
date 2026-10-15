@@ -1,8 +1,8 @@
 import { createScheduledController } from 'cloudflare:test';
-import { env } from 'cloudflare:workers';
+import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import worker from '../src/index';
-import { call, expectError, pairDevice, registerUser, setupInstance, uploadText } from './helpers';
+import { call, expectError, ORIGIN, pairDevice, registerUser, setupInstance, uploadText } from './helpers';
 
 describe('clipboard upload', () => {
   let cookie: string;
@@ -171,6 +171,140 @@ describe('clipboard history', () => {
     expectError(await call('DELETE', `/api/v1/clipboard/${ids[0]}`, { cookie }), 404, 'not_found');
     expect((await call('DELETE', '/api/v1/clipboard', { cookie })).status).toBe(204);
     expect((await call('GET', '/api/v1/clipboard', { cookie })).body).toEqual({ entries: [], next_cursor: null });
+  });
+});
+
+describe('rich text', () => {
+  let cookie: string;
+  let token: string;
+  beforeAll(async () => {
+    cookie = (await registerUser('rich')).cookie;
+    token = (await pairDevice(cookie)).token;
+  });
+  const uploadRich = (content: string, html: unknown) =>
+    call('POST', '/api/v1/device/clipboard', {
+      token,
+      origin: null,
+      body: { content, html, idempotency_key: crypto.randomUUID() },
+    });
+
+  it('stores formatting verbatim, as data, next to the plain text', async () => {
+    const html = '<b>Bold</b> and <i>italic</i><script>alert(1)</script>';
+    const res = await uploadRich('Bold and italic', html);
+    expect(res.status).toBe(201);
+    const [listed] = (await call('GET', '/api/v1/clipboard', { cookie })).body.entries;
+    expect(listed).toMatchObject({ preview: 'Bold and italic', has_html: true, size_bytes: 15 + html.length });
+    expect(listed.html).toBeUndefined();
+    const entry = await call('GET', `/api/v1/clipboard/${res.body.entry.id}`, { cookie });
+    expect(entry.body.entry).toMatchObject({ content: 'Bold and italic', html });
+    expect(entry.headers.get('content-type')).toBe('application/json');
+
+    const plain = await uploadText(token, 'no formatting here');
+    expect((await call('GET', `/api/v1/clipboard/${plain.body.entry.id}`, { cookie })).body.entry.html).toBeNull();
+  });
+
+  it('searches the plain text, not the markup', async () => {
+    await uploadRich('visible words', '<span title="markuponly">visible words</span>');
+    expect((await call('GET', '/api/v1/clipboard?q=markuponly', { cookie })).body.entries).toHaveLength(0);
+    expect((await call('GET', '/api/v1/clipboard?q=visible', { cookie })).body.entries).toHaveLength(1);
+  });
+
+  it('counts formatting toward the size limit and validates it', async () => {
+    expectError(await uploadRich('x'.repeat(600 * 1024), 'y'.repeat(500 * 1024)), 413, 'content_too_large');
+    for (const bad of ['', 42, '\uD800 lone surrogate']) {
+      expectError(await uploadRich('text', bad), 400, 'invalid_request');
+    }
+    expect((await uploadRich('text', null)).status).toBe(201);
+  });
+});
+
+describe('images', () => {
+  let cookie: string;
+  let token: string;
+  beforeAll(async () => {
+    cookie = (await registerUser('img')).cookie;
+    token = (await pairDevice(cookie)).token;
+  });
+  // A real 1×1 PNG, plus fake images that only need the right signature (the server never decodes images).
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const b64 = (bytes: ArrayLike<number>) => btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(''));
+  const fakePng = () =>
+    b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...crypto.getRandomValues(new Uint8Array(32))]);
+  const JPEG = b64([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+  const uploadImage = (fields: Record<string, unknown>, as = token) =>
+    call('POST', '/api/v1/device/clipboard', {
+      token: as,
+      origin: null,
+      body: { content: 'Image 1 × 1', idempotency_key: crypto.randomUUID(), ...fields },
+    });
+  const fetchBytes = async (path: string, as = cookie) => {
+    const res = await exports.default.fetch(new Request(ORIGIN + path, { headers: { cookie: as } }));
+    const data = new Uint8Array(await res.arrayBuffer());
+    return { res, base64: b64(data) };
+  };
+
+  it('stores images and serves them back byte for byte, with a thumbnail', async () => {
+    const res = await uploadImage({ image: PNG, image_type: 'image/png', thumbnail: JPEG });
+    expect(res.status).toBe(201);
+    const [listed] = (await call('GET', '/api/v1/clipboard', { cookie })).body.entries;
+    expect(listed).toMatchObject({ preview: 'Image 1 × 1', has_image: true, image_type: 'image/png', has_html: false });
+    const entry = (await call('GET', `/api/v1/clipboard/${res.body.entry.id}`, { cookie })).body.entry;
+    expect(entry).toMatchObject({ has_image: true, image_type: 'image/png' });
+    expect(entry.image).toBeUndefined();
+
+    const image = await fetchBytes(`/api/v1/clipboard/${res.body.entry.id}/image`);
+    expect(image.res.status).toBe(200);
+    expect(image.base64).toBe(PNG);
+    expect(image.res.headers.get('content-type')).toBe('image/png');
+    expect(image.res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(image.res.headers.get('content-security-policy')).toContain('sandbox');
+    const thumb = await fetchBytes(`/api/v1/clipboard/${res.body.entry.id}/thumbnail`);
+    expect([thumb.base64, thumb.res.headers.get('content-type')]).toEqual([JPEG, 'image/jpeg']);
+  });
+
+  it('serves the full image as the thumbnail when none was sent', async () => {
+    const image = fakePng();
+    const res = await uploadImage({ image, image_type: 'image/png' });
+    const thumb = await fetchBytes(`/api/v1/clipboard/${res.body.entry.id}/thumbnail`);
+    expect([thumb.base64, thumb.res.headers.get('content-type')]).toEqual([image, 'image/png']);
+  });
+
+  it('accepts only real PNG and JPEG data, never SVG', async () => {
+    const svg = btoa('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>');
+    expectError(await uploadImage({ image: svg, image_type: 'image/svg+xml' }), 415, 'unsupported_content_type');
+    expectError(await uploadImage({ image: svg, image_type: 'image/png' }), 415, 'unsupported_content_type');
+    expectError(await uploadImage({ image: PNG, image_type: 'image/jpeg' }), 415, 'unsupported_content_type');
+    expectError(
+      await uploadImage({ image: PNG, image_type: 'image/png', thumbnail: PNG }),
+      415,
+      'unsupported_content_type',
+    );
+    expectError(await uploadImage({ image: '%%% not base64', image_type: 'image/png' }), 400, 'invalid_request');
+    expectError(await uploadImage({ image: PNG, image_type: 'image/png', html: '<b>x</b>' }), 400, 'invalid_request');
+    expectError(await uploadImage({ thumbnail: JPEG }), 400, 'invalid_request');
+  });
+
+  it('replaces an identical image instead of duplicating it', async () => {
+    const image = fakePng();
+    const first = await uploadImage({ image, image_type: 'image/png', content: 'Image first' });
+    const again = await uploadImage({ image, image_type: 'image/png', content: 'Image again' });
+    expectError(await call('GET', `/api/v1/clipboard/${first.body.entry.id}`, { cookie }), 404, 'not_found');
+    expect((await call('GET', `/api/v1/clipboard/${again.body.entry.id}`, { cookie })).status).toBe(200);
+  });
+
+  it('counts image bytes toward the entry limit', async () => {
+    const big = b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Uint8Array(1024 * 1024)]);
+    expectError(await uploadImage({ image: big, image_type: 'image/png', thumbnail: JPEG }), 413, 'content_too_large');
+  });
+
+  it('never serves an image to anyone but its owner', async () => {
+    const res = await uploadImage({ image: fakePng(), image_type: 'image/png' });
+    const other = await registerUser('imgother');
+    for (const kind of ['image', 'thumbnail']) {
+      const path = `/api/v1/clipboard/${res.body.entry.id}/${kind}`;
+      expect((await fetchBytes(path, other.cookie)).res.status).toBe(404);
+      expect((await fetchBytes(path, '')).res.status).toBe(401);
+    }
   });
 });
 
