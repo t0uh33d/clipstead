@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  worker:
+    name: Worker and web app
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Lint and formatting
+        run: npm run lint
+      - name: Integration tests (Worker + local D1 in workerd)
+        run: npm test
+      - name: Migrations apply cleanly to an empty database
+        run: npx wrangler d1 migrations apply DB --local
+      - name: Build (bundle without deploying)
+        run: npx wrangler deploy --dry-run --outdir dist
+
+  macos:
+    name: macOS app
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: apps/macos
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build
+      - name: Unit tests
+        run: swift test
+      - name: App bundle
+        run: ./scripts/build-app.sh
