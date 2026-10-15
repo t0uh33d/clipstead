@@ -13,5 +13,9 @@ export default defineConfig({
       },
     })),
   ],
-  test: { setupFiles: ['./test/setup.ts'] },
+  test: {
+    setupFiles: ['./test/setup.ts'],
+    // Integration tests make many real requests (some hash passwords); shared CI runners are much slower than laptops.
+    testTimeout: 30_000,
+  },
 });
