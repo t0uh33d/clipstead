@@ -1,0 +1,28 @@
+{
+  "name": "clipstead-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:web": "tsc -p ../apps/web",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "types": "wrangler types --include-env=false",
+    "typecheck": "npm run types && tsc -p . && tsc -p test && tsc -p ../apps/web --noEmit",
+    "lint": "biome check .. && npm run lint:html",
+    "lint:html": "! grep -rnE 'innerHTML|outerHTML|insertAdjacentHTML|document\\.write' ../apps/web/src",
+    "format": "biome check --write ..",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@cloudflare/vitest-plugin": "1.4.2",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
+    "wrangler": "4.151.0"
+  }
+}

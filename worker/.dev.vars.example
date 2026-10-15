@@ -1,0 +1,4 @@
+# Local development secrets. Copy to .dev.vars (gitignored) and change the value.
+# In production set it with: npx wrangler secret put SETUP_TOKEN
+# Generate one with: openssl rand -base64 32
+SETUP_TOKEN=replace-with-at-least-32-random-characters

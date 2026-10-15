@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "clipstead",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  // The web UI is static files. /api/* always reaches the Worker; every other path is served from assets.
+  "assets": {
+    "directory": "../apps/web/public",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "build": { "command": "npm run build:web", "watch_dir": "../apps/web/src" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "clipstead",
+      // Add "database_id" here after `npx wrangler d1 create clipstead` (docs/self-hosting.md).
+      // Local development and tests do not need it.
+      "migrations_dir": "migrations"
+    }
+  ],
+  // Cleanup every 15 minutes: entries past retention (default 6 hours), expired sessions, pairing codes, invites
+  // and rate-limit counters. Expired entries are hidden immediately; this deletes them.
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "vars": {
+    // Maximum clipboard storage per user, in MiB.
+    "STORAGE_QUOTA_MB": "100"
+  },
+  // Off by default. If you enable Workers Logs, note that request URLs (including search terms) are logged.
+  "observability": { "enabled": false }
+}
