@@ -272,6 +272,17 @@ button.small {
   cursor: copy;
 }
 
+.entry img.thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 240px;
+  margin: 0 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  cursor: copy;
+}
+
 .meta {
   display: flex;
   flex-wrap: wrap;

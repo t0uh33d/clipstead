@@ -20,6 +20,10 @@ interface Entry {
   device_name: string | null;
   preview: string;
   truncated: boolean;
+  /** A formatted (rich text) version exists. It is never rendered here, only copied. */
+  has_html: boolean;
+  /** An image entry: `preview` is its label; the picture is at /clipboard/:id/image (and /thumbnail). */
+  has_image: boolean;
 }
 interface Device {
   id: string;
@@ -240,20 +244,32 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
 
 // ---------------------------------------------------------------- clipboard
 
-async function fullText(id: string): Promise<string> {
-  return (await api<{ entry: { content: string } }>('GET', `/clipboard/${id}`)).entry.content;
+async function fullEntry(id: string): Promise<{ content: string; html: string | null }> {
+  return (await api<{ entry: { content: string; html: string | null } }>('GET', `/clipboard/${id}`)).entry;
 }
 
-/** Copies an entry. Reports success only after the browser confirms the write. */
+const fullText = async (id: string) => (await fullEntry(id)).content;
+
+/**
+ * Copies an entry, with its formatting when it has some: pasting into a rich-text editor keeps it, pasting into a
+ * plain field gets the text. Reports success only after the browser confirms the write.
+ */
 async function copyEntry(entry: Entry, button: HTMLButtonElement) {
   try {
     if (!navigator.clipboard) throw new Error('Clipboard API unavailable');
-    if (!entry.truncated) {
+    if (entry.has_image) {
+      if (typeof ClipboardItem === 'undefined') throw new Error('Image copy unsupported');
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngImage(entry.id) })]);
+    } else if (!entry.truncated && !entry.has_html) {
       await navigator.clipboard.writeText(entry.preview);
     } else if (typeof ClipboardItem !== 'undefined') {
-      // Safari only allows clipboard writes that start inside the click, so hand it a pending Blob.
-      const blob = fullText(entry.id).then((text) => new Blob([text], { type: 'text/plain' }));
-      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })]);
+      // Safari only allows clipboard writes that start inside the click, so hand it pending Blobs.
+      const full = fullEntry(entry.id);
+      const blob = (type: string, pick: (e: { content: string; html: string | null }) => string) =>
+        full.then((e) => new Blob([pick(e)], { type }));
+      const formats: Record<string, Promise<Blob>> = { 'text/plain': blob('text/plain', (e) => e.content) };
+      if (entry.has_html) formats['text/html'] = blob('text/html', (e) => e.html ?? e.content);
+      await navigator.clipboard.write([new ClipboardItem(formats)]);
     } else {
       await navigator.clipboard.writeText(await fullText(entry.id));
     }
@@ -264,8 +280,31 @@ async function copyEntry(entry: Entry, button: HTMLButtonElement) {
     toast('Copied to clipboard.');
   } catch (err) {
     if (err instanceof ApiError) return toast(err.message);
+    if (entry.has_image) {
+      // Opening it lets the user copy it with the browser's own image menu.
+      window.open(imageUrl(entry.id), '_blank', 'noopener');
+      return toast('Your browser blocked copying the image, so it opened in a new tab.');
+    }
     copyFallback(entry.truncated ? await fullText(entry.id).catch(() => entry.preview) : entry.preview);
   }
+}
+
+const imageUrl = (id: string, thumbnail = false) => `/api/v1/clipboard/${id}/${thumbnail ? 'thumbnail' : 'image'}`;
+
+/** The entry's image as PNG, the image format browsers can put on the clipboard. JPEGs are converted. */
+async function pngImage(id: string): Promise<Blob> {
+  const res = await fetch(imageUrl(id), { credentials: 'same-origin' });
+  if (!res.ok) throw new ApiError(res.status, 'image_unavailable', 'Could not load the image.');
+  const blob = await res.blob();
+  if (blob.type === 'image/png') return blob;
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((png) => (png ? resolve(png) : reject(new Error('PNG conversion failed'))), 'image/png'),
+  );
 }
 
 /** When the browser refuses clipboard access (permissions, insecure context), let the user copy by hand. */
@@ -504,13 +543,22 @@ function historyView() {
     const item = h(
       'li',
       { class: 'entry' },
-      h('pre', {}, entry.truncated ? `${entry.preview}…` : entry.preview),
+      entry.has_image
+        ? h('img', {
+            class: 'thumb',
+            src: imageUrl(entry.id, true),
+            alt: `Copied image: ${entry.preview}`,
+            loading: 'lazy',
+          })
+        : h('pre', {}, entry.truncated ? `${entry.preview}…` : entry.preview),
       h(
         'div',
         { class: 'meta' },
         time(entry.created_at),
         entry.device_name && h('span', {}, `· ${entry.device_name}`),
         h('span', {}, `· ${bytes(entry.size_bytes)}`),
+        entry.has_html && h('span', { class: 'badge', title: 'Copies with its formatting' }, 'Formatted'),
+        entry.has_image && h('span', { class: 'badge' }, entry.preview),
         h(
           'span',
           { class: 'actions' },
@@ -537,7 +585,7 @@ function historyView() {
       ),
     );
     // Clicking the text copies it too, unless the user is selecting part of it.
-    item.querySelector('pre')?.addEventListener('click', () => {
+    item.querySelector('pre, img')?.addEventListener('click', () => {
       if (!window.getSelection()?.toString()) copyEntry(entry, copy);
     });
     return item;
