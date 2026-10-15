@@ -1,0 +1,29 @@
+# Dependencies and local state
+node_modules/
+.wrangler/
+.vitest/
+.DS_Store
+
+# Secrets: never commit these (copy worker/.dev.vars.example to worker/.dev.vars for local development)
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.env
+.env.*
+
+# Generated
+worker/worker-configuration.d.ts
+worker/dist/
+apps/web/public/*.js
+
+# Swift / Xcode
+apps/macos/.build/
+apps/macos/.swiftpm/
+apps/macos/build/
+xcuserdata/
+DerivedData/
+.gstack/
+
+# Local, not part of the project
+context.md
+.vscode/
