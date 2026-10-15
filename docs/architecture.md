@@ -52,7 +52,8 @@ users ─┬─< sessions            (token_hash, expires_at)
        ├─< devices             (token_hash, cleared on revoke)
        ├─< pairing_challenges  (code_hash, poll_token_hash, state timestamps)
        ├─< invites             (code_hash; created_by)
-       └─< clipboard_entries   (content, content_hash, size_bytes, idempotency_key, device_id → devices)
+       └─< clipboard_entries   (content, html, image, image_type, thumbnail, content_hash, size_bytes,
+                                idempotency_key, device_id → devices)
 rate_limits (hashed key, window_start, count)
 ```
 
@@ -82,7 +83,10 @@ the challenge, and the next poll returns `410`.
 
 `ClipboardMonitor` polls `NSPasteboard.changeCount` (0.5–5 s, with timer tolerance), which is a cheap call. On a
 change, `ClipboardFilter` checks the type identifiers for privacy markers and the frontmost app against exclusions
-before reading any text, then applies the size limit and consecutive-duplicate check. Accepted text goes to
+before reading any text, skips Finder file copies, then applies the size limit and consecutive-duplicate check. For
+text, the formatted version is read too (`NSPasteboard.formattedHTML`: the app's HTML, or RTF/RTFD converted to HTML).
+A copy with no text but an image becomes an image upload: `ClipboardImage.fitting` keeps the original PNG when it fits
+in 1 MB, otherwise re-encodes smaller (off the main thread), and adds a 480-pixel JPEG thumbnail. Accepted text goes to
 `UploadQueue`, an actor holding at most 20 items in memory. It uploads one at a time with a UUID idempotency key
 that is reused across retries, so a retry never creates a second entry. Transient failures back off exponentially
 with jitter (up to 8 attempts). Offline waits don't use up attempts, but items older than an hour are dropped. A

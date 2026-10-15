@@ -51,6 +51,13 @@ searches and copies your history from any browser. Multiple users per instance, 
   `innerHTML`), strict CSP via `_headers`.
 - **macOS app**: SwiftPM, macOS 14+, `MenuBarExtra`, polling `NSPasteboard.changeCount`, in-memory bounded
   upload queue (nothing written to disk), Keychain for the token, honours `org.nspasteboard.ConcealedType`.
+- **Rich content**: formatting travels as HTML (the copying app's HTML, or RTF converted on the Mac), since HTML is
+  the only rich format browsers can write back to a clipboard. Images travel as PNG or JPEG (original PNG when it
+  fits, re-encoded otherwise) with a JPEG thumbnail, all within the 1 MiB entry limit. Stored in D1 rather than R2: R2
+  needs a payment method even on its free tier, and one table keeps isolation, quotas, retention and cascading deletes
+  automatic. Never rendered: HTML only goes to the clipboard API; images are served as raster bytes only.
+- **Releases**: pushing a `v*` tag runs `.github/workflows/release.yml`, which publishes `Clipstead.dmg` (universal,
+  ad-hoc signed, not notarized).
 
 ## Milestones
 
@@ -69,19 +76,22 @@ searches and copies your history from any browser. Multiple users per instance, 
 | --- | --- |
 | `npm run typecheck` (TypeScript 7, strict) | pass |
 | `npm run lint` (Biome + HTML-injection guard) | pass |
-| `npm test`: Worker + local D1 in workerd, 71 tests incl. 11 cross-user isolation | 71/71 pass |
-| `wrangler d1 migrations apply --local` on an empty DB; `wrangler deploy --dry-run` | pass (bundle 40 KiB) |
+| `npm test`: Worker + local D1 in workerd, incl. 12 cross-user isolation tests, formatting and images | 81/81 pass |
+| Migrations on an empty DB and on an existing one (0001 → 0002); `wrangler deploy --dry-run` | pass |
 | `swift build` (Swift 6 language mode) | pass, no warnings |
-| `swift test`: URL rules, filter (real `NSPasteboard`), queue, API client, Keychain | 23/23 pass |
-| `IntegrationTests` (Swift client + queue against `wrangler dev`) | pass |
-| `scripts/e2e.sh` (real app binary, real clipboard, local server) | 10/10 checks pass |
-| Browser QA of the web app (setup, login errors, pairing approval, history, XSS payload, copy, delete, settings, invites, revoke, 375 px layout) | pass; copy success path verified with a stubbed Clipboard API |
+| `swift test`: URL rules, filter, formatting/RTF conversion, image fitting, queue, API client, Keychain | 29/29 pass |
+| `IntegrationTests` (Swift client + queue against `wrangler dev`, incl. formatting and images) | pass |
+| `scripts/e2e.sh` (real app, real clipboard: text, HTML, RTF, PNG, privacy skips, revocation) | 13/13 pass |
+| `scripts/package-dmg.sh`: universal app in a DMG, checksum and signature verified after mounting | pass |
+| GitHub Actions CI on `ubuntu-latest` and `macos-15` | pass |
+| Browser QA of the web app (setup, sign-in, pairing, history, XSS payload, thumbnails, copy text/HTML/image, settings, invites, revoke, 375 px) | pass; clipboard writes checked with a stubbed Clipboard API |
 
 ## Not verified
 
 - Deployment to Cloudflare (no account access was authorised), including the production PBKDF2 limit, Free-plan
   CPU behaviour of sign-in, cron execution and `_headers` on the edge.
-- The GitHub Actions workflow itself (no remote); its steps were run locally.
+- The release workflow runs for the first time with the first tag.
+- Pasting formatting into specific apps (Pages, Word, Google Docs) by hand; real (unstubbed) browser clipboard writes.
 - Safari and Firefox; the real (unstubbed) browser clipboard write; screen readers.
 - The SwiftUI menu and Settings window by eye, launch at login, excluded-app behaviour in the running app, and the
   Keychain prompt behaviour after rebuilding an ad-hoc signed app.

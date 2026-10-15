@@ -177,12 +177,34 @@ The device revokes its own token (used by "Unpair This Mac"). `204`.
 
 ## Clipboard
 
+An entry is **text** (`content`), optionally with its **formatting** (`html`), or an **image** (`image`, with
+`content` as a short label such as `Image 1920 × 1080`). Formatting and images are stored and returned as data: the web
+app never renders HTML, and images are served only as PNG or JPEG bytes.
+
 ### `POST /device/clipboard` (device)
 ```json
-{ "content": "text", "content_type": "text/plain", "idempotency_key": "E621E1F8-C36C-495A-93FC-0C247A3E6E5F" }
+{
+  "content": "Bold and italic",
+  "html": "<b>Bold</b> and <i>italic</i>",
+  "idempotency_key": "E621E1F8-C36C-495A-93FC-0C247A3E6E5F"
+}
 ```
-- `content`: non-empty, valid Unicode, at most 1 MiB of UTF-8. Stored and returned verbatim, as text.
-- `content_type`: only `text/plain` (default). Anything else gets `415 unsupported_content_type`.
+```json
+{
+  "content": "Image 1920 × 1080",
+  "image": "<base64 PNG or JPEG>",
+  "image_type": "image/png",
+  "thumbnail": "<base64 JPEG, optional>",
+  "idempotency_key": "C3F1…"
+}
+```
+- `content`: non-empty, valid Unicode text. Stored and returned verbatim. `content_type` may be sent and must be
+  `text/plain` (the default).
+- `html` (optional): the formatted version of `content`, as HTML. Not allowed together with `image`.
+- `image` (optional): base64 PNG or JPEG. `image_type` must be `image/png` or `image/jpeg` and match the data's
+  signature bytes; anything else (including SVG) gets `415 unsupported_content_type`.
+- `thumbnail` (optional, images only): base64 JPEG of at most 128 KiB, shown in history lists.
+- The whole entry (`content` + `html` + `image` + `thumbnail`) is limited to 1 MiB.
 - `idempotency_key`: 16–64 characters of `A-Z a-z 0-9 _ -`, unique per upload attempt. Retrying with the same key
   returns the original entry instead of creating another.
 
@@ -190,16 +212,16 @@ Responses:
 - `201 {"entry": {"id", "created_at"}}`: stored. The entry is committed to D1 before this response is sent.
 - `200 {"entry": …}`: the same key and content were already stored (a retry).
 - `409 idempotency_key_reused`: the key was used for different content.
-- `413 content_too_large`, `400 invalid_request`, `415`.
+- `413 content_too_large`, `400 invalid_request`, `415 unsupported_content_type`.
 - `507 storage_quota_exceeded`: the user's quota (`STORAGE_QUOTA_MB`, default 100) is full.
 - `401 invalid_device_token`: revoked or unknown; pair again.
 
-If the user already has an entry with identical content, it is replaced, so re-copied text moves to the top
-instead of being duplicated. Rate limit: 120 per minute per device.
+If the user already has an entry with the same text (or, for images, the same image bytes), it is replaced, so copying
+something again moves it to the top instead of duplicating it. Rate limit: 120 per minute per device.
 
 ### `GET /clipboard` (session)
 Query parameters: `limit` (1–100, default 50), `cursor` (from the previous page), `q` (search, up to 200
-characters: a literal, ASCII-case-insensitive substring match).
+characters: a literal, ASCII-case-insensitive substring match on `content`).
 
 ```json
 {
@@ -207,7 +229,8 @@ characters: a literal, ASCII-case-insensitive substring match).
     {
       "id": "…", "content_type": "text/plain", "size_bytes": 2880, "created_at": 1760500000000,
       "device_id": "…", "device_name": "Alice's MacBook",
-      "preview": "first 1000 characters…", "truncated": true
+      "preview": "first 1000 characters…", "truncated": true,
+      "has_html": false, "has_image": false, "image_type": null
     }
   ],
   "next_cursor": "1760500000000.uuid" | null
@@ -216,7 +239,12 @@ characters: a literal, ASCII-case-insensitive substring match).
 Newest first, ordered by `(created_at, id)`, so pages never overlap or skip.
 
 ### `GET /clipboard/:id` (session)
-`200 {"entry": {…, "content": "full text"}}` or `404`.
+`200 {"entry": {…, "content": "full text", "html": "…" | null}}` or `404`. Image bytes are not included.
+
+### `GET /clipboard/:id/image` and `GET /clipboard/:id/thumbnail` (session)
+The image (PNG or JPEG) or its thumbnail (JPEG; the full image when there is none), as raw bytes with the matching
+`Content-Type`, `X-Content-Type-Options: nosniff` and a sandboxing CSP. `404` for entries that are not images, not
+yours, or past retention.
 
 ### `DELETE /clipboard/:id` (session)
 `204` or `404`.

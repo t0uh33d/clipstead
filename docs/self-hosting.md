@@ -119,7 +119,7 @@ again; revoke the old device in the web app).
 
 | Data | Where |
 | --- | --- |
-| Clipboard text (**plaintext**), its size and SHA-256 | D1 |
+| Clipboard text, its formatting (HTML) and images, all **unencrypted**, with size and SHA-256 | D1 |
 | Usernames, PBKDF2 password hashes, settings | D1 |
 | SHA-256 hashes of session cookies and device tokens; device names, platforms, last-seen times | D1 |
 | Pairing requests (including the claiming IP), for at most 10 minutes | D1 |
@@ -180,7 +180,9 @@ and [D1](https://developers.cloudflare.com/d1/platform/pricing/) pages. At the t
   if many sign-ins fail with error 1102, consider the Workers Paid plan.
 - D1: 5 million rows read and 100,000 rows written per day, **500 MB per database**. Each upload costs a few writes;
   each page of history reads at most one row per entry. A personal instance stays well inside these limits.
-- With the default 100 MB per-user quota, a Free-plan database has room for about five users who fill their quota.
+- Images take far more space than text (up to 1 MB each). With the default 6-hour retention that rarely matters, but
+  with long retention and the default 100 MB per-user quota a Free-plan database has room for about five users who
+  fill their quota.
   Lower `STORAGE_QUOTA_MB` or use Workers Paid (10 GB per database) for more.
 
 Clipstead never promises unlimited free hosting. If you exceed Free limits, requests fail until the daily reset.

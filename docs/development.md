@@ -82,5 +82,9 @@ response to revocation. It overwrites your clipboard while it runs and restores 
    deploying.
 6. Check that no secrets are tracked: `git ls-files | grep -iE '\.dev\.vars$|\.env|secret|\.pem|\.p12'` prints nothing,
    and `git grep -nE 'csd_[A-Za-z0-9_-]{43}|SETUP_TOKEN=[^r]'` prints nothing.
-7. Update `VERSION` in `scripts/build-app.sh` and the version in `worker/package.json`. Tag the release.
-8. Optional: sign with a Developer ID (`SIGN_IDENTITY=…`) and notarise before distributing the app.
+7. Update the version in `worker/package.json` and the default `VERSION` in `apps/macos/scripts/build-app.sh`.
+8. Tag and push: `git tag -a vX.Y.Z -m "Clipstead X.Y.Z" && git push origin vX.Y.Z`. The Release workflow
+   (`.github/workflows/release.yml`) tests and builds the app on `macos-15`, packages `Clipstead.dmg` with
+   `scripts/package-dmg.sh`, and publishes a GitHub release with the disk image, its SHA-256 and the notes in
+   `.github/release-notes.md`. The README links to `releases/latest/download/Clipstead.dmg`, so it always gets the newest.
+9. Not yet automated: signing with a Developer ID and notarizing (needs an Apple Developer account).

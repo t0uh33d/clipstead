@@ -67,6 +67,12 @@ statements, never as check-then-write.
 token; the signed-in owner approves after seeing the device's details; the Mac's next poll mints the device token,
 once. Device tokens may only upload and manage themselves. They cannot read history.
 
+**Rich content**: an entry is text (`content`), optionally with formatting (`html`), or an image (`image`,
+`image_type`, `thumbnail`; `content` is then a label). All of it is data: the web app never renders HTML (it only
+hands it to the clipboard API), and images are accepted only as PNG/JPEG with matching signature bytes and served raw
+from `/clipboard/:id/image|thumbnail`. The Mac reads formatting via `NSPasteboard.formattedHTML` (app HTML, else
+RTF→HTML) and images via `ClipboardImage.fitting` (original PNG if it fits in 1 MiB, else re-encoded).
+
 **Retention**: per-user `retention_hours` (default 6). Reads filter out expired entries immediately; the cron
 (`*/15 * * * *`) deletes them via `cleanup()` in `routes/clipboard.ts`.
 
@@ -102,6 +108,10 @@ forget its credential.
 - Vitest is pinned to 4.1 because vitest 5 does not support Node 25.
 - `wrangler dev` computes static-asset ETags at startup. The `watch_dir` build in `wrangler.jsonc` refreshes them;
   if the UI looks stale, restart `npm run dev`.
+- D1 returns BLOB columns as `ArrayBuffer` or `number[]`; `new Uint8Array(value)` handles both. In tests, don't spread
+  large arrays into `String.fromCharCode(...)`: it overflows the stack.
+- Releases: pushing a `v*` tag runs `.github/workflows/release.yml` (DMG via `apps/macos/scripts/package-dmg.sh`).
+  `hdiutil` prints deprecation warnings on macOS 27; they are harmless.
 - In Swift, `URL.appending(path:)` percent-encodes `?`. Build URLs with query strings another way.
 - Reading a Keychain item created by another process (for example the `security` CLI) makes macOS show an access
   prompt and blocks the app. That is why `e2e.sh` lets the debug app pair itself via the debug-only
