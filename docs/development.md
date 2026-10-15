@@ -42,6 +42,7 @@ swift build
 swift test                          # unit tests; the integration test is skipped unless configured
 swift run Clipstead                 # runs unbundled (shows a Dock icon; launch at login unavailable)
 ./scripts/build-app.sh              # build/Clipstead.app, universal, ad-hoc signed
+./scripts/package-dmg.sh            # build/Clipstead.dmg (+ .sha256) from the app above, as releases do
 ```
 
 Debug builds keep their device token under a separate Keychain service ("Clipstead device token (debug build)"),
@@ -59,8 +60,8 @@ swift test --filter IntegrationTests    # API client and upload queue: pair, upl
 
 `scripts/e2e.sh` starts the debug app with `-E2EPairingCode` (a hook compiled only into debug builds) so it pairs
 itself. The script approves the pairing like a browser would, then copies text with `pbcopy` and checks the server.
-It verifies uploads, that pre-existing and concealed clipboard content are skipped, deduplication, and the app's
-response to revocation. It overwrites your clipboard while it runs and restores its text at the end.
+It verifies plain text, formatting (HTML, and RTF converted on the Mac) and a real PNG image reaching the server, that
+pre-existing and concealed clipboard content are skipped, deduplication, and the app's response to revocation. It overwrites your clipboard while it runs and restores its text at the end.
 
 ## Conventions
 
@@ -83,7 +84,7 @@ response to revocation. It overwrites your clipboard while it runs and restores 
 6. Check that no secrets are tracked: `git ls-files | grep -iE '\.dev\.vars$|\.env|secret|\.pem|\.p12'` prints nothing,
    and `git grep -nE 'csd_[A-Za-z0-9_-]{43}|SETUP_TOKEN=[^r]'` prints nothing.
 7. Update the version in `worker/package.json` and the default `VERSION` in `apps/macos/scripts/build-app.sh`.
-8. Tag and push: `git tag -a vX.Y.Z -m "Clipstead X.Y.Z" && git push origin vX.Y.Z`. The Release workflow
+8. Wait for CI to pass on the commit, then tag and push: `git tag -a vX.Y.Z -m "Clipstead X.Y.Z" && git push origin vX.Y.Z`. The Release workflow
    (`.github/workflows/release.yml`) tests and builds the app on `macos-15`, packages `Clipstead.dmg` with
    `scripts/package-dmg.sh`, and publishes a GitHub release with the disk image, its SHA-256 and the notes in
    `.github/release-notes.md`. The README links to `releases/latest/download/Clipstead.dmg`, so it always gets the newest.

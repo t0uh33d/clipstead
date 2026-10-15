@@ -5,7 +5,7 @@ All endpoints are under `/api/v1` on your instance, e.g. `https://clipstead.exam
 ## Conventions
 
 - **Transport**: HTTPS only. Plain HTTP is refused (`403 https_required`) except on `localhost`.
-- **Bodies**: JSON with `Content-Type: application/json` (otherwise `415`). Limit 16 KiB, or 2 MiB for uploads (`413`).
+- **Bodies**: JSON with `Content-Type: application/json` (otherwise `415`). Limit 16 KiB, or 3 MiB for uploads (`413`), since base64 images and escaped HTML are larger than the 1 MiB entry they carry.
 - **Timestamps**: integers, milliseconds since the Unix epoch.
 - **IDs**: opaque strings (UUIDs). Knowing an ID never grants access.
 - **Errors**: `{"error": {"code": "machine_readable_code", "message": "Human-readable text."}}`.

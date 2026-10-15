@@ -84,22 +84,22 @@ searches and copies your history from any browser. Multiple users per instance, 
 | `scripts/e2e.sh` (real app, real clipboard: text, HTML, RTF, PNG, privacy skips, revocation) | 13/13 pass |
 | `scripts/package-dmg.sh`: universal app in a DMG, checksum and signature verified after mounting | pass |
 | GitHub Actions CI on `ubuntu-latest` and `macos-15` | pass |
+| Release workflow: tag `v0.1.0` published `Clipstead.dmg`; downloaded via the README link, checksum matched, app inside is 0.1.0, universal, validly signed | pass |
 | Browser QA of the web app (setup, sign-in, pairing, history, XSS payload, thumbnails, copy text/HTML/image, settings, invites, revoke, 375 px) | pass; clipboard writes checked with a stubbed Clipboard API |
 
 ## Not verified
 
 - Deployment to Cloudflare (no account access was authorised), including the production PBKDF2 limit, Free-plan
   CPU behaviour of sign-in, cron execution and `_headers` on the edge.
-- The release workflow runs for the first time with the first tag.
-- Pasting formatting into specific apps (Pages, Word, Google Docs) by hand; real (unstubbed) browser clipboard writes.
-- Safari and Firefox; the real (unstubbed) browser clipboard write; screen readers.
+- Pasting formatting into specific apps (Pages, Word, Google Docs) by hand.
+- Safari and Firefox; real (unstubbed) browser clipboard writes; screen readers.
+- Gatekeeper's first-launch prompt for the downloaded DMG on a clean Mac.
 - The SwiftUI menu and Settings window by eye, launch at login, excluded-app behaviour in the running app, and the
   Keychain prompt behaviour after rebuilding an ad-hoc signed app.
 
 ## Next steps
 
 1. Deploy a test instance, run the browser and Mac flows against it, and confirm the PBKDF2 limit.
-2. Push to GitHub and confirm CI on `ubuntu-latest` and `macos-15`.
-3. Visual and accessibility pass on the Mac app's menu and Settings window; test Safari and Firefox.
-4. Signed and notarised Mac releases.
-5. Candidates: an iOS share extension, images via R2, optional end-to-end encryption.
+2. Visual and accessibility pass on the Mac app's menu and Settings window; test Safari and Firefox.
+3. Developer ID signing and notarization in the release workflow (needs an Apple Developer account).
+4. Candidates: an iOS share extension, larger images via R2, optional end-to-end encryption.

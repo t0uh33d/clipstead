@@ -7,7 +7,7 @@ database. Nothing depends on the project author's servers, and no custom domain 
 
 - A Cloudflare account. The Free plan works; see [limits and costs](#limits-and-costs).
 - Node.js 22 or newer, and git.
-- To build the Mac app: macOS 14 (Sonoma) or later with Xcode 16 or later.
+- For the Mac app: macOS 14 (Sonoma) or later, Apple silicon or Intel. Building it yourself also needs Xcode 16 or later.
 
 ## Deploy
 
@@ -61,19 +61,30 @@ and you may delete it with `npx wrangler secret delete SETUP_TOKEN`.
 
 ## Install the Mac app
 
+Download **[Clipstead.dmg](https://github.com/t0uh33d/clipstead/releases/latest/download/Clipstead.dmg)** from the
+[latest release](https://github.com/t0uh33d/clipstead/releases/latest), open it and drag **Clipstead** into
+**Applications**. To check the download, get `Clipstead.dmg.sha256` from the same release and run
+`shasum -a 256 -c Clipstead.dmg.sha256`.
+
+The app is ad-hoc signed but not notarized by Apple, so macOS blocks the first launch. Open **System Settings →
+Privacy & Security**, scroll to the message about Clipstead and click **Open Anyway** (or run
+`xattr -dr com.apple.quarantine /Applications/Clipstead.app`). After each update macOS may also ask once whether
+Clipstead can use its Keychain item, because the new build has a new signature; choose **Always Allow**.
+
+To build the app yourself instead:
+
 ```sh
 cd apps/macos
 ./scripts/build-app.sh          # creates build/Clipstead.app (universal, ad-hoc signed)
 cp -R build/Clipstead.app /Applications/
-open /Applications/Clipstead.app
 ```
 
-The app lives in the menu bar. Open **Settings…**, enter your server address and click **Save**. In the web app,
-go to **Devices → Add a Mac**, type the code it shows into the app, then check the device details in the browser
-and click **Approve**. Finally turn on **Sync clipboard to this server** and confirm.
+Set `SIGN_IDENTITY` to sign with your own Developer ID.
 
-Because the app is built locally and ad-hoc signed, macOS may ask for Keychain access again after you rebuild it.
-Choose **Always Allow**. To sign with your own Developer ID, set `SIGN_IDENTITY` when running the build script.
+**Pair it.** The app lives in the menu bar. Open **Settings…**, enter your server address and click **Save**. In the
+web app, go to **Devices → Add a Mac**, type the code it shows into the app, then check the device details in the
+browser and click **Approve**. Finally turn on **Sync clipboard to this server** and confirm. Formatting and images
+sync by default; you can turn either off in **Settings → Privacy**.
 
 ## Users and registration
 
@@ -168,7 +179,8 @@ npx wrangler deploy
 ```
 
 Migrations are applied before the deploy and are written to keep the previous version working. Take an export first
-if you want a fallback. Rebuild and reinstall the Mac app when its code changes.
+if you want a fallback. To update the Mac app, download the new `Clipstead.dmg` from the latest release (or rebuild
+it) and replace the copy in Applications; it keeps its settings and pairing.
 
 ## Limits and costs
 
@@ -214,5 +226,7 @@ On each Mac: **Settings → Diagnostics → Reset Clipstead…**, then delete th
 | "Too many requests" | Rate limits; wait for the window (at most an hour). |
 | Mac app: "Use https://" | The app accepts plain HTTP only for `localhost`. |
 | Mac app: "Access revoked. Pair this Mac again" | The device was revoked or the account disabled. Pair again. |
-| Mac app keeps asking for Keychain access | Expected once after each rebuild of an ad-hoc signed app; choose **Always Allow**. |
-| Copies from an app are not synced | Check Settings → Privacy (excluded apps, size limit). Password managers mark copies as confidential, and Clipstead skips them on purpose. |
+| macOS says Clipstead can't be opened | The app is not notarized: **System Settings → Privacy & Security → Open Anyway**. |
+| Mac app keeps asking for Keychain access | Expected once after each update or rebuild of an ad-hoc signed app; choose **Always Allow**. |
+| Copies from an app are not synced | Check Settings → Privacy (excluded apps, size limit). Password managers mark copies as confidential, and Clipstead skips them on purpose. Files copied in Finder are never synced. |
+| Formatting or images missing | Check **Keep formatting** and **Sync images** in Settings → Privacy. Images over the size limit are re-encoded smaller, and skipped if even the smallest version does not fit. |

@@ -36,6 +36,7 @@ cd apps/macos
 swift build && swift test
 swift test --filter UploadQueueTests/testRetryNowSkipsTheBackoffWait
 ./scripts/build-app.sh                # build/Clipstead.app (universal, ad-hoc signed)
+./scripts/package-dmg.sh              # build/Clipstead.dmg + .sha256, as the release workflow does
 # Against a running `npm run dev` with an existing account:
 CLIPSTEAD_TEST_SERVER=http://localhost:8787 CLIPSTEAD_TEST_USERNAME=admin CLIPSTEAD_TEST_PASSWORD='…' \
   swift test --filter IntegrationTests   # Swift client + upload queue against the real API
@@ -105,7 +106,8 @@ forget its credential.
   pass with values that would fail when deployed.
 - Vitest storage is isolated per test *file*: tests in one file share the database and rate-limit counters. Use
   fresh users (`registerUser()`) and per-call client IPs (`call()` does this) to avoid cross-test limits.
-- Vitest is pinned to 4.1 because vitest 5 does not support Node 25.
+- Vitest is pinned to 4.1 because vitest 5 does not support Node 25. Tests get 30 s each (`vitest.config.ts`):
+  some make 100+ real requests, which is slow on GitHub's runners.
 - `wrangler dev` computes static-asset ETags at startup. The `watch_dir` build in `wrangler.jsonc` refreshes them;
   if the UI looks stale, restart `npm run dev`.
 - D1 returns BLOB columns as `ArrayBuffer` or `number[]`; `new Uint8Array(value)` handles both. In tests, don't spread

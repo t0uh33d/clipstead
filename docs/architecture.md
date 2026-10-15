@@ -27,8 +27,10 @@
 | `worker/migrations/` | Versioned D1 schema |
 | `worker/test/` | Integration tests that run the real Worker against local D1 inside `workerd` |
 | `apps/web/` | `public/` static files (HTML, CSS, `_headers`), `src/app.ts` compiled to `public/app.js` |
-| `apps/macos/Sources/ClipsteadCore` | Testable logic: server URL rules, API client, clipboard filter, upload queue, Keychain |
+| `apps/macos/Sources/ClipsteadCore` | Testable logic: server URL rules, API client, clipboard filter, formatting and image capture, upload queue, Keychain |
 | `apps/macos/Sources/Clipstead` | The app: `AppModel` (state and wiring), `ClipboardMonitor`, SwiftUI menu and settings |
+| `apps/macos/scripts` | `build-app.sh` (universal app bundle), `package-dmg.sh` (release disk image), `e2e.sh` (end-to-end test) |
+| `.github/workflows` | `ci.yml` (checks on every push and pull request), `release.yml` (publishes `Clipstead.dmg` for `v*` tags) |
 
 The deliberately flat layout reflects the size of the code: one router, three route files, and no framework. The
 Worker has no runtime dependencies, and neither does the web app.

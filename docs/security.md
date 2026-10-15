@@ -44,7 +44,7 @@ To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 | 4 | Replayed pairing request | A code can be claimed once (atomic `UPDATE … WHERE claimed_at IS NULL`); the poll token yields a credential once (transactional); expired, denied and completed requests return `410` | `pairing.test.ts` |
 | 5 | Leaked device token | Tokens are 256-bit, stored only as SHA-256, scoped to one device and one user, cannot read history or act as a browser session, and stop working on the next request after revocation. Residual risk: until revoked, the holder can add entries to that account | `pairing.test.ts` |
 | 6 | Stolen session or CSRF | Cookie is `__Host-`, `HttpOnly`, `Secure`, `SameSite=Strict`; only its hash is stored; unsafe requests need a matching `Origin`; bodies must be JSON; no CORS; logout deletes the server-side session | `auth.test.ts` |
-| 7 | Oversized or malformed requests | Bodies are read with a hard cap (16 KiB, 2 MiB for uploads); strict JSON and type validation; content limited to 1 MiB of valid Unicode `text/plain`; per-user storage quota; upload rate limit 120/min per device | `clipboard.test.ts`, `auth.test.ts` |
+| 7 | Oversized or malformed requests | Bodies are read with a hard cap (16 KiB, 3 MiB for uploads); strict JSON and type validation; each entry (text, formatting and image together) limited to 1 MiB, text must be valid Unicode and images PNG or JPEG; per-user storage quota; upload rate limit 120/min per device | `clipboard.test.ts`, `auth.test.ts` |
 | 8 | SQL injection | Every value is a bound parameter. Search uses `instr()` with a bound needle, so `%`, `_` and quotes are literal text | `clipboard.test.ts` |
 | 9 | Unauthorized initial setup | Requires the `SETUP_TOKEN` secret (32+ characters, set by the operator, compared in constant time, rate-limited). Setup is one transaction that only succeeds while no setup has completed, so concurrent attempts create exactly one administrator | `auth.test.ts` |
 | 10 | A revoked device keeps uploading | Revocation clears the stored token hash (enforced by a `CHECK` constraint); every request re-checks the database. The Mac app stops syncing and deletes its Keychain item on `401` | `pairing.test.ts`, `apps/macos/scripts/e2e.sh` |
@@ -149,8 +149,9 @@ deduplication. The API and schema are versioned to allow that change.
 - Nothing is uploaded until the Mac is paired, the user has consented to the named server, and sync is on. Content
   already on the clipboard when sync starts is never uploaded. Pausing clears the queue and cancels the request in
   flight.
-- Locally built apps are ad-hoc signed. macOS may ask for Keychain access again after you rebuild the app, because
-  the signature changed; choose "Always Allow". Notarised releases are not provided yet.
+- Released and locally built apps are ad-hoc signed and not notarized: macOS asks the user to approve the first launch
+  (Privacy & Security → Open Anyway), and may ask for Keychain access again after each update, because the signature
+  changed. Each release publishes the DMG's SHA-256 so downloads can be verified.
 
 ## Not provided
 

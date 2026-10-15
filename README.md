@@ -75,8 +75,8 @@ Full instructions, including backups, upgrades, costs and teardown, are in
 
 ## Status and limitations
 
-Early (0.1). Tested on macOS 27 with Xcode 26.2, and with Chromium for the web app. Other browsers and older macOS
-versions (the minimum is 14) have not been tested yet.
+Early (0.1). Tested by hand on macOS 27 and with Chromium for the web app; CI builds and tests the Mac app on macOS 15.
+It has not yet been run on macOS 14, the minimum, or tested in Safari or Firefox.
 
 - Files copied in Finder are not synced. Images are limited to 1 MB per item and re-encoded smaller when needed.
 - The downloadable app is ad-hoc signed, not notarized, so macOS asks you to approve its first launch.
