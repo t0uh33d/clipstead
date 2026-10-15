@@ -16,8 +16,9 @@ swift build -c release --arch arm64 --arch x86_64
 BIN_DIR=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Clipstead" "$APP/Contents/MacOS/Clipstead"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 sed -e "s/__BUNDLE_ID__/$BUNDLE_ID/" -e "s/__VERSION__/$VERSION/" Resources/Info.plist > "$APP/Contents/Info.plist"
 
 if [ "$SIGN_IDENTITY" = "-" ]; then
