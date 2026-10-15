@@ -129,7 +129,7 @@ struct AccountTab: View {
             } header: {
                 Text("Sync")
             } footer: {
-                Text("While sync is on, plain text you copy is uploaded to \(host). Pause any time from the menu bar.")
+                Text("While sync is on, text and images you copy are uploaded to \(host). Pause any time from the menu bar.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -143,8 +143,8 @@ struct AccountTab: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("""
-            While sync is on, plain text you copy on this Mac is uploaded to \(host). Anyone who controls that \
-            server or its database can read it. Clipstead skips content that password managers mark as confidential \
+            While sync is on, text (with its formatting) and images you copy on this Mac are uploaded to \(host). \
+            Anyone who controls that server or its database can see them. Clipstead skips content that password managers mark as confidential \
             and apps you exclude, but it cannot recognise every password or secret.
             """)
         }
@@ -200,10 +200,13 @@ struct PrivacyTab: View {
                     Text("256 KB").tag(256 * 1024)
                     Text("1 MB").tag(1024 * 1024)
                 }
-                LabeledContent("Content types", value: "Plain text only")
+                Toggle("Keep formatting (rich text)", isOn: $model.syncFormatting)
+                Toggle("Sync images", isOn: $model.syncImages)
                 Text("""
-                Images, files and formatting are never uploaded. Items that password managers mark as confidential \
-                (the nspasteboard.org convention) are always skipped.
+                Formatting (bold, links, lists) is uploaded alongside the plain text, so pasting from the web app keeps \
+                it. Images that do not fit the size limit are uploaded smaller. Files copied in Finder are never \
+                uploaded, and items that password managers mark as confidential (the nspasteboard.org convention) are \
+                always skipped.
                 """)
                 .foregroundStyle(.secondary)
             }

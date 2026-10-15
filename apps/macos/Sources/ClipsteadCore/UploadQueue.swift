@@ -4,6 +4,10 @@ public struct PendingUpload: Equatable, Sendable {
     /// Also the server-side idempotency key, so every retry of this item is the same upload.
     public let id: String
     public let text: String
+    /// Optional formatted version (rich text) as HTML.
+    public let html: String?
+    /// Set for image entries; `text` is then the image's label.
+    public let image: ClipboardImage?
     public let queuedAt: Date
 }
 
@@ -87,12 +91,12 @@ public actor UploadQueue {
 
     /// Queues text for upload and returns the number of pending items.
     @discardableResult
-    public func enqueue(_ text: String, now: Date = Date()) async -> Int {
+    public func enqueue(_ text: String, html: String? = nil, image: ClipboardImage? = nil, now: Date = Date()) async -> Int {
         if items.count >= policy.capacity {
             items.removeFirst()
             await emit(.dropped(reason: "queue_full"))
         }
-        items.append(PendingUpload(id: UUID().uuidString, text: text, queuedAt: now))
+        items.append(PendingUpload(id: UUID().uuidString, text: text, html: html, image: image, queuedAt: now))
         startIfNeeded()
         return items.count
     }

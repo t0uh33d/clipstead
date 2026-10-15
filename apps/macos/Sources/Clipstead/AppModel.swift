@@ -23,6 +23,10 @@ final class AppModel {
         }
     }
     var maxContentBytes: Int { didSet { defaults.set(maxContentBytes, forKey: Keys.maxBytes) } }
+    /// Upload the formatted (rich text) version too, so pasting from the web app keeps bold, links, lists…
+    var syncFormatting: Bool { didSet { defaults.set(syncFormatting, forKey: Keys.formatting) } }
+    /// Upload copied images (screenshots, pictures), re-encoded to fit the size limit when needed.
+    var syncImages: Bool { didSet { defaults.set(syncImages, forKey: Keys.images) } }
     var excludedApps: [String] { didSet { defaults.set(excludedApps, forKey: Keys.excluded) } }
     private(set) var username: String? { didSet { defaults.set(username, forKey: Keys.username) } }
     private(set) var deviceName: String? { didSet { defaults.set(deviceName, forKey: Keys.deviceName) } }
@@ -52,8 +56,10 @@ final class AppModel {
     private enum Keys {
         static let server = "server", consent = "consentGiven", resume = "resumeOnLaunch", interval = "pollInterval"
         static let maxBytes = "maxContentBytes", excluded = "excludedApps", username = "username"
-        static let deviceName = "deviceName", deviceID = "deviceID", wasSyncing = "wasSyncing"
-        static let all = [server, consent, resume, interval, maxBytes, excluded, username, deviceName, deviceID, wasSyncing]
+        static let deviceName = "deviceName", deviceID = "deviceID", wasSyncing = "wasSyncing", formatting = "syncFormatting"
+        static let images = "syncImages"
+        static let all = [server, consent, resume, interval, maxBytes, excluded, username, deviceName, deviceID, wasSyncing,
+                          formatting, images]
     }
 
     private let defaults = UserDefaults.standard
@@ -75,7 +81,9 @@ final class AppModel {
         consentGiven = defaults.bool(forKey: Keys.consent)
         resumeOnLaunch = defaults.object(forKey: Keys.resume) as? Bool ?? true
         pollInterval = defaults.object(forKey: Keys.interval) as? Double ?? 1
-        maxContentBytes = defaults.object(forKey: Keys.maxBytes) as? Int ?? 256 * 1024
+        maxContentBytes = defaults.object(forKey: Keys.maxBytes) as? Int ?? 1024 * 1024
+        syncFormatting = defaults.object(forKey: Keys.formatting) as? Bool ?? true
+        syncImages = defaults.object(forKey: Keys.images) as? Bool ?? true
         excludedApps = defaults.stringArray(forKey: Keys.excluded) ?? ClipboardFilter.defaultExcludedApps
         username = defaults.string(forKey: Keys.username)
         deviceName = defaults.string(forKey: Keys.deviceName)
@@ -182,7 +190,9 @@ final class AppModel {
         consentGiven = false
         resumeOnLaunch = true
         pollInterval = 1
-        maxContentBytes = 256 * 1024
+        maxContentBytes = 1024 * 1024
+        syncFormatting = true
+        syncImages = true
         excludedApps = ClipboardFilter.defaultExcludedApps
         lastSyncAt = nil
         lastProblem = nil
@@ -226,7 +236,8 @@ final class AppModel {
     private func clipboardChanged() {
         guard syncEnabled, let queue else { return }
         let pasteboard = NSPasteboard.general
-        let filter = ClipboardFilter(excludedApps: Set(excludedApps), maxBytes: min(maxContentBytes, serverMaxBytes))
+        let maxBytes = min(maxContentBytes, serverMaxBytes)
+        let filter = ClipboardFilter(excludedApps: Set(excludedApps), maxBytes: maxBytes)
         let decision = filter.evaluate(
             types: pasteboard.typeIdentifiers,
             sourceApp: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
@@ -236,9 +247,35 @@ final class AppModel {
         case .upload(let text):
             lastUploadedHash = ClipboardFilter.hash(text)
             lastSkip = nil
+            // Read only now that the filters allowed this copy. Too large with formatting: send the plain text.
+            var html = syncFormatting ? pasteboard.formattedHTML : nil
+            if let formatted = html, text.utf8.count + formatted.utf8.count > maxBytes { html = nil }
             Task {
                 guard syncEnabled else { return } // Paused in the meantime: drop it.
-                pendingCount = await queue.enqueue(text)
+                pendingCount = await queue.enqueue(text, html: html)
+            }
+        case .uploadImage:
+            guard syncImages, let source = pasteboard.imageSource else {
+                lastSkip = .noText
+                return
+            }
+            Task {
+                // Re-encoding a large image takes a moment: keep it off the main thread.
+                let image = await Task.detached(priority: .utility) { ClipboardImage.fitting(source, maxBytes: maxBytes) }
+                    .value
+                guard let image else {
+                    lastSkip = .tooLarge
+                    return
+                }
+                let hash = ClipboardFilter.hash(image.data)
+                guard hash != lastUploadedHash else {
+                    lastSkip = .duplicate
+                    return
+                }
+                lastUploadedHash = hash
+                lastSkip = nil
+                guard syncEnabled else { return } // Paused in the meantime: drop it.
+                pendingCount = await queue.enqueue(image.label, image: image)
             }
         case .skip(let reason):
             lastSkip = reason
@@ -257,7 +294,10 @@ final class AppModel {
         queue = UploadQueue(
             uploader: { item in
                 do {
-                    return .uploaded(try await api.upload(text: item.text, idempotencyKey: item.id, token: token).createdAt)
+                    let receipt = try await api.upload(
+                        text: item.text, html: item.html, image: item.image, idempotencyKey: item.id, token: token
+                    )
+                    return .uploaded(receipt.createdAt)
                 } catch let error as APIError {
                     return error.uploadOutcome
                 } catch {
@@ -386,7 +426,7 @@ final class AppModel {
         Clipstead \(Self.appVersion) on \(Self.platform)
         Server: \(server?.absoluteString ?? "not set")
         Paired: \(paired)
-        Sync: \(syncEnabled ? "on" : "paused"), every \(pollInterval)s, up to \(maxContentBytes) bytes
+        Sync: \(syncEnabled ? "on" : "paused"), every \(pollInterval)s, up to \(maxContentBytes) bytes, formatting \(syncFormatting ? "on" : "off"), images \(syncImages ? "on" : "off")
         Network: \(isOnline ? "online" : "offline")
         Last upload: \(lastSyncAt.map { $0.formatted(.iso8601) } ?? "never")
         Waiting: \(pendingCount), not uploaded: \(droppedCount)

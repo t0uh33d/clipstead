@@ -85,6 +85,18 @@ final class IntegrationTests: XCTestCase {
         let second = try await api.upload(text: text + " retry", idempotencyKey: key, token: credential.token)
         XCTAssertEqual(first, second)
 
+        // 4b. Formatting and images round-trip unchanged.
+        let rich = try await api.upload(text: "rich \(UUID())", html: "<b>rich</b>", idempotencyKey: UUID().uuidString, token: credential.token)
+        let (_, richEntry) = try await browser.call("GET", "clipboard/\(rich.entryID)")
+        XCTAssertEqual((richEntry["entry"] as? [String: Any])?["html"] as? String, "<b>rich</b>")
+        let png = try XCTUnwrap(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="))
+        let picture = ClipboardImage(data: png, type: "image/png", thumbnail: Data([0xFF, 0xD8, 0xFF, 0xE0, 0, 1]), width: 1, height: 1)
+        let uploadedImage = try await api.upload(text: picture.label, image: picture, idempotencyKey: UUID().uuidString, token: credential.token)
+        let imageURL = try XCTUnwrap(URL(string: "\(server.absoluteString)/api/v1/clipboard/\(uploadedImage.entryID)/image"))
+        let (imageBytes, imageResponse) = try await browser.session.data(from: imageURL)
+        XCTAssertEqual(imageBytes, png)
+        XCTAssertEqual((imageResponse as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"), "image/png")
+
         // 5. The browser finds the entry by search.
         let query = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
         let (listStatus, list) = try await browser.call("GET", "clipboard?q=\(query)")

@@ -51,11 +51,12 @@ final class UploadQueueTests: XCTestCase {
         let script = Script(delay: .milliseconds(20))
         let events = Events()
         let queue = makeQueue(script, events, policy: fastPolicy())
-        await queue.enqueue("first")
+        await queue.enqueue("first", html: "<b>first</b>")
         await queue.enqueue("second")
         await eventually { await events.list.count == 2 }
-        let texts = await script.calls.map(\.text)
-        XCTAssertEqual(texts, ["first", "second"])
+        let calls = await script.calls
+        XCTAssertEqual(calls.map(\.text), ["first", "second"])
+        XCTAssertEqual(calls.map(\.html), ["<b>first</b>", nil])
         let count = await queue.count
         XCTAssertEqual(count, 0)
     }

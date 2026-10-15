@@ -124,15 +124,23 @@ public struct APIClient: Sendable {
         _ = try await perform("DELETE", "device/me", token: token, body: nil)
     }
 
-    /// Uploads text. Retrying with the same `idempotencyKey` never creates a second entry.
-    public func upload(text: String, idempotencyKey: String, token: String) async throws -> UploadReceipt {
+    /// Uploads text, optionally with its formatted version as HTML, or an image (with `text` as its label). Retrying
+    /// with the same `idempotencyKey` never creates a second entry.
+    public func upload(
+        text: String, html: String? = nil, image: ClipboardImage? = nil, idempotencyKey: String, token: String
+    ) async throws -> UploadReceipt {
         struct Body: Decodable {
             struct Entry: Decodable { let id: String; let createdAt: Int64 }
             let entry: Entry
         }
-        let body: Body = try await send("POST", "device/clipboard", token: token, body: [
-            "content": text, "content_type": "text/plain", "idempotency_key": idempotencyKey,
-        ])
+        var fields = ["content": text, "content_type": "text/plain", "idempotency_key": idempotencyKey]
+        if let html { fields["html"] = html }
+        if let image {
+            fields["image"] = image.data.base64EncodedString()
+            fields["image_type"] = image.type
+            fields["thumbnail"] = image.thumbnail.base64EncodedString()
+        }
+        let body: Body = try await send("POST", "device/clipboard", token: token, body: fields)
         return UploadReceipt(entryID: body.entry.id, createdAt: date(body.entry.createdAt))
     }
 

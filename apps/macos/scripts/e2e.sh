@@ -72,6 +72,28 @@ printf 'e2e copied %s' "$RUN" | pbcopy
 sleep 2
 check "copying the same text again does not duplicate it" "$(found "e2e copied $RUN")" 1
 
+# Formatting: an app's own HTML (as browsers write it), and RTF only (as TextEdit writes it), converted on the Mac.
+newest() { web GET "clipboard?q=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1")&limit=1" | field "$2"; }
+pasteboard() { osascript -l JavaScript -e "ObjC.import('AppKit'); const pb = \$.NSPasteboard.generalPasteboard; pb.clearContents; $1; ''" >/dev/null; }
+pasteboard "pb.declareTypesOwner(\$(['public.html', 'public.utf8-plain-text']), null);
+  pb.setStringForType(\$('<p><b>e2e html $RUN</b></p>'), 'public.html'); pb.setStringForType(\$('e2e html $RUN'), 'public.utf8-plain-text')"
+sleep 2
+check "formatting from HTML is kept" "$(newest "e2e html $RUN" 'd["entries"][0]["has_html"]')" True
+pasteboard "pb.declareTypesOwner(\$(['public.rtf', 'public.utf8-plain-text']), null);
+  pb.setDataForType(\$('{\\\\rtf1\\\\ansi {\\\\b e2e rtf $RUN}}').dataUsingEncoding(\$.NSUTF8StringEncoding), 'public.rtf');
+  pb.setStringForType(\$('e2e rtf $RUN'), 'public.utf8-plain-text')"
+sleep 2
+RTF_ID=$(newest "e2e rtf $RUN" 'd["entries"][0]["id"]')
+check "formatting from RTF is converted and kept" "$(web GET "clipboard/$RTF_ID" | field '"<b>" in (d["entry"]["html"] or "")')" True
+
+# Images: a real PNG, uploaded unchanged when it fits.
+sips -s format png --resampleWidth 200 Resources/AppIcon.icns --out "$TMP/e2e.png" >/dev/null
+pasteboard "pb.declareTypesOwner(\$(['public.png']), null); pb.setDataForType(\$.NSData.dataWithContentsOfFile('$TMP/e2e.png'), 'public.png')"
+sleep 3
+IMAGE_ID=$(web GET "clipboard?limit=1" | field 'd["entries"][0]["id"] if d["entries"][0]["has_image"] else ""')
+curl -s -b "$TMP/cookies" "$S/api/v1/clipboard/$IMAGE_ID/image" -o "$TMP/downloaded.png"
+check "a copied image is uploaded unchanged" "$(shasum -a 256 < "$TMP/downloaded.png" | cut -c1-64)" "$(shasum -a 256 < "$TMP/e2e.png" | cut -c1-64)"
+
 DEVICE_ID=$(web GET devices | field '[x["id"] for x in d["devices"]][0]')
 web DELETE "devices/$DEVICE_ID" >/dev/null
 printf 'e2e after revoke %s' "$RUN" | pbcopy

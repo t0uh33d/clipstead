@@ -81,6 +81,23 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(json, ["content": "héllo\n<b>", "content_type": "text/plain", "idempotency_key": "KEY-1234567890123456"])
     }
 
+    func testUploadsFormattingAndImagesAsJSONFields() async throws {
+        respond(201, #"{"entry":{"id":"e2","created_at":1700000000000}}"#)
+        _ = try await client.upload(text: "Bold", html: "<b>Bold</b>", idempotencyKey: "KEY-1234567890123456", token: "t")
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: StubProtocol.requests[0].body) as? [String: String])
+        XCTAssertEqual(json["html"], "<b>Bold</b>")
+        XCTAssertNil(json["image"])
+
+        let image = ClipboardImage(data: Data([0x89, 0x50]), type: "image/png", thumbnail: Data([0xFF, 0xD8]), width: 2, height: 1)
+        _ = try await client.upload(text: image.label, image: image, idempotencyKey: "KEY-6543210987654321", token: "t")
+        json = try XCTUnwrap(JSONSerialization.jsonObject(with: StubProtocol.requests[1].body) as? [String: String])
+        XCTAssertEqual(json["content"], "Image 2 × 1")
+        XCTAssertEqual(json["image"], Data([0x89, 0x50]).base64EncodedString())
+        XCTAssertEqual(json["image_type"], "image/png")
+        XCTAssertEqual(json["thumbnail"], Data([0xFF, 0xD8]).base64EncodedString())
+        XCTAssertNil(json["html"])
+    }
+
     func testMapsHTTPFailuresToActionableErrors() async {
         respond(401, #"{"error":{"code":"invalid_device_token","message":"revoked"}}"#)
         let unauthorized = await error { try await self.client.deviceInfo(token: "t") }
