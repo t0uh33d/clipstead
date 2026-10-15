@@ -1,0 +1,36 @@
+name: Release
+
+# Pushing a version tag (e.g. `git tag v0.2.0 && git push origin v0.2.0`) builds the Mac app, packages it as
+# Clipstead.dmg and publishes a GitHub release with the disk image and its SHA-256.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: Build and publish Clipstead.dmg
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: apps/macos
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: swift test
+      - name: Build Clipstead.app
+        run: VERSION="${GITHUB_REF_NAME#v}" ./scripts/build-app.sh
+      - name: Package Clipstead.dmg
+        run: ./scripts/package-dmg.sh
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          build/Clipstead.dmg build/Clipstead.dmg.sha256
+          --title "Clipstead ${GITHUB_REF_NAME#v}"
+          --notes-file ../../.github/release-notes.md
+          --generate-notes
+          --verify-tag
